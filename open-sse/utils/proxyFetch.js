@@ -48,8 +48,14 @@ async function resolveRealIP(hostname) {
 
 /**
  * Check if request should bypass MITM DNS redirect
+ * Check if request should bypass MITM DNS redirect.
+ * Gated by MITM_BYPASS_ENABLED env (default off) — only needed when running a
+ * local MITM proxy with /etc/hosts overrides. On clean environments (e.g. VPS),
+ * the bypass causes raw-IP outbound that may be blocked by egress firewalls,
+ * producing ECONNREFUSED and slow fallbacks.
  */
 function shouldBypassMitmDns(url) {
+  if (process.env.MITM_BYPASS_ENABLED !== "true") return false;
   try {
     const hostname = new URL(url).hostname;
     return MITM_BYPASS_HOSTS.some(host => hostname.includes(host));
