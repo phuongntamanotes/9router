@@ -8,7 +8,7 @@ FROM base AS builder
 RUN apk --no-cache upgrade && apk --no-cache add nodejs npm python3 make g++ linux-headers
 
 COPY package.json ./
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=s/18b314cf-c14a-4b28-a519-a902ee18c9d4-/root/.npm,target=/root/.npm \
   npm install
 RUN npm i -g 9router
 
