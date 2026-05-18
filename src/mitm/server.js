@@ -4,14 +4,17 @@ const path = require("path");
 const dns = require("dns");
 const { promisify } = require("util");
 const { execSync } = require("child_process");
-const { log, err, dumpRequest, createResponseDumper } = require("./logger");
-const { TARGET_HOSTS, URL_PATTERNS, MODEL_SYNONYMS, getToolForHost } = require("./config");
+const { log, err, dumpRequest, createResponseDumper, clearDumpDir } = require("./logger");
+const { IS_DEV, TARGET_HOSTS, URL_PATTERNS, MODEL_SYNONYMS, MODEL_PATTERNS, getToolForHost } = require("./config");
 const { DATA_DIR, MITM_DIR } = require("./paths");
 const { getCertForDomain } = require("./cert/generate");
 const { getMitmAlias } = require("./dbReader");
 const LOCAL_PORT = 443;
 const IS_WIN = process.platform === "win32";
-const ENABLE_FILE_LOG = true;
+const ENABLE_FILE_LOG = IS_DEV;
+
+// Clear stale dump files on every MITM start (prevents unbounded disk usage)
+clearDumpDir();
 const INTERNAL_REQUEST_HEADER = { name: "x-request-source", value: "local" };
 
 // Host rewrite for upstream forward: PROD cloudcode-pa is rate-limited (429),
@@ -20,17 +23,11 @@ const HOST_REWRITE = {
   "cloudcode-pa.googleapis.com": "daily-cloudcode-pa.googleapis.com",
 };
 
-// Load handlers — dev/ overrides handlers/ for private implementations
-function loadHandler(name) {
-  try { return require(`./dev/${name}`); } catch {}
-  return require(`./handlers/${name}`);
-}
-
 const handlers = {
-  antigravity: loadHandler("antigravity"),
-  copilot: loadHandler("copilot"),
-  kiro: loadHandler("kiro"),
-  cursor: loadHandler("cursor"),
+  antigravity: require("./handlers/antigravity"),
+  copilot: require("./handlers/copilot"),
+  kiro: require("./handlers/kiro"),
+  cursor: require("./handlers/cursor"),
 };
 
 // ── SSL / SNI ─────────────────────────────────────────────────
@@ -114,7 +111,13 @@ function getMappedModel(tool, model) {
     if (aliases[lookup]) return aliases[lookup];
     // Prefix match fallback
     const prefixKey = Object.keys(aliases).find(k => k && aliases[k] && (lookup.startsWith(k) || k.startsWith(lookup)));
-    return prefixKey ? aliases[prefixKey] : null;
+    if (prefixKey) return aliases[prefixKey];
+    // Pattern fallback: catches AG renamed variants (e.g. gemini-pro-agent → gemini-3.1-pro-high)
+    const patterns = MODEL_PATTERNS?.[tool] || [];
+    for (const { match, alias } of patterns) {
+      if (match.test(lookup) && aliases[alias]) return aliases[alias];
+    }
+    return null;
   } catch { return null; }
 }
 
